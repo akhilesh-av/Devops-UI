@@ -318,7 +318,70 @@ def main():
         else:
             st.info("Please upload a Copilot metrics JSON file to begin analysis.")
             
-                
+            # Show sample data structure
+            # st.markdown("### Expected JSON Structure")
+            # st.json({
+            #     "date": "YYYY-MM-DD",
+            #     "copilot_ide_chat": {
+            #         "total_engaged_users": 0,
+            #         "editors": [
+            #             {
+            #                 "name": "editor_name",
+            #                 "models": [
+            #                     {
+            #                         "name": "model_name",
+            #                         "total_chats": 0,
+            #                         "is_custom_model": False,
+            #                         "total_engaged_users": 0
+            #                     }
+            #                 ],
+            #                 "total_engaged_users": 0
+            #             }
+            #         ]
+            #     },
+            #     "total_active_users": 0,
+            #     "copilot_dotcom_chat": {
+            #         "total_engaged_users": 0
+            #     },
+            #     "total_engaged_users": 0,
+            #     "copilot_dotcom_pull_requests": {
+            #         "total_engaged_users": 0
+            #     },
+            #     "copilot_ide_code_completions": {
+            #         "total_engaged_users": 0,
+            #         "editors": [
+            #             {
+            #                 "name": "editor_name",
+            #                 "models": [
+            #                     {
+            #                         "name": "model_name",
+            #                         "languages": [
+            #                             {
+            #                                 "name": "language_name",
+            #                                 "total_engaged_users": 0,
+            #                                 "total_code_acceptances": 0,
+            #                                 "total_code_suggestions": 0
+            #                             }
+            #                         ],
+            #                         "is_custom_model": False,
+            #                         "total_engaged_users": 0
+            #                     }
+            #                 ],
+            #                 "total_engaged_users": 0
+            #             }
+            #         ],
+            #         "languages": [
+            #             {
+            #                 "name": "language_name",
+            #                 "total_engaged_users": 0
+            #             }
+            #         ]
+            #     }
+            # })
+    
+    with tab2:
+        st.markdown("### Fetch Data from GitHub API")
+        
         # Input for GitHub API token
         api_token = st.text_input("GitHub API Token", type="password", 
                                  help="Enter a GitHub personal access token with the copilot scope")
