@@ -125,6 +125,35 @@ def flatten_data(data):
     
     return pd.DataFrame(flattened_data)
 
+def extract_language_acceptance_data(data):
+    """Extract detailed language acceptance data from the JSON structure"""
+    language_data = []
+    
+    for day in data:
+        date = day['date']
+        editors = day.get('copilot_ide_code_completions', {}).get('editors', [])
+        
+        for editor in editors:
+            editor_name = editor['name']
+            models = editor.get('models', [])
+            
+            for model in models:
+                languages = model.get('languages', [])
+                
+                for lang in languages:
+                    language_data.append({
+                        'date': date,
+                        'editor': editor_name,
+                        'language': lang['name'],
+                        'total_engaged_users': lang.get('total_engaged_users', 0),
+                        'total_code_acceptances': lang.get('total_code_acceptances', 0),
+                        'total_code_suggestions': lang.get('total_code_suggestions', 0),
+                        'total_code_lines_accepted': lang.get('total_code_lines_accepted', 0),
+                        'total_code_lines_suggested': lang.get('total_code_lines_suggested', 0)
+                    })
+    
+    return pd.DataFrame(language_data)
+
 def create_summary_metrics(df):
     """Create summary metrics cards"""
     col1, col2, col3, col4 = st.columns(4)
@@ -152,24 +181,93 @@ def create_timeseries_chart(df, metric, title):
     fig.update_yaxes(title_text=metric.replace('_', ' ').title())
     return fig
 
-def create_language_usage_chart(data):
-    """Create a chart showing language usage over time"""
-    language_columns = [col for col in data.columns if col not in [
-        'date', 'ide_chat_users', 'code_completion_users', 'dotcom_chat_users', 
-        'pr_users', 'total_active_users', 'total_engaged_users'
-    ] and not col.startswith('editor_')]
+def create_individual_language_charts(language_df):
+    """Create individual charts for each language showing usage over time"""
+    languages = language_df['language'].unique()
     
-    language_data = data.melt(id_vars=['date'], value_vars=language_columns, 
-                             var_name='language', value_name='users')
+    for language in languages:
+        if language != 'unknown':  # Skip unknown language
+            lang_data = language_df[language_df['language'] == language]
+            
+            if not lang_data.empty and lang_data['total_engaged_users'].sum() > 0:
+                st.markdown(f"### {language.title()} Usage")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Users over time
+                    fig = px.line(lang_data, x='date', y='total_engaged_users', 
+                                 title=f'{language.title()} - Engaged Users Over Time')
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    # Acceptance rate over time
+                    lang_data['acceptance_rate'] = (lang_data['total_code_acceptances'] / 
+                                                   lang_data['total_code_suggestions'] * 100)
+                    lang_data['acceptance_rate'] = lang_data['acceptance_rate'].replace([np.inf, -np.inf], 0)
+                    lang_data['acceptance_rate'] = lang_data['acceptance_rate'].fillna(0)
+                    
+                    fig = px.line(lang_data, x='date', y='acceptance_rate', 
+                                 title=f'{language.title()} - Acceptance Rate Over Time')
+                    fig.update_yaxes(title_text='Acceptance Rate (%)', range=[0, 100])
+                    st.plotly_chart(fig, use_container_width=True)
+
+def create_acceptance_rate_analysis(language_df):
+    """Calculate and display acceptance rate analysis by language"""
+    st.markdown("## 📊 Code Acceptance Rate by Language")
+    
+    # Calculate acceptance rates
+    language_stats = language_df.groupby('language').agg({
+        'total_code_acceptances': 'sum',
+        'total_code_suggestions': 'sum',
+        'total_code_lines_accepted': 'sum',
+        'total_code_lines_suggested': 'sum',
+        'total_engaged_users': 'sum'
+    }).reset_index()
+    
+    language_stats['acceptance_rate'] = (language_stats['total_code_acceptances'] / 
+                                        language_stats['total_code_suggestions'] * 100)
+    language_stats['lines_acceptance_rate'] = (language_stats['total_code_lines_accepted'] / 
+                                              language_stats['total_code_lines_suggested'] * 100)
+    
+    # Replace inf and NaN values
+    language_stats['acceptance_rate'] = language_stats['acceptance_rate'].replace([np.inf, -np.inf], 0)
+    language_stats['acceptance_rate'] = language_stats['acceptance_rate'].fillna(0)
+    language_stats['lines_acceptance_rate'] = language_stats['lines_acceptance_rate'].replace([np.inf, -np.inf], 0)
+    language_stats['lines_acceptance_rate'] = language_stats['lines_acceptance_rate'].fillna(0)
     
     # Filter out languages with no usage
-    language_data = language_data[language_data['users'] > 0]
+    language_stats = language_stats[language_stats['total_engaged_users'] > 0]
     
-    if not language_data.empty:
-        fig = px.area(language_data, x='date', y='users', color='language',
-                     title='Language Usage Over Time')
-        return fig
-    return None
+    if not language_stats.empty:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Acceptance rate by language (bar chart)
+            fig = px.bar(language_stats, x='language', y='acceptance_rate',
+                        title='Code Acceptance Rate by Language',
+                        labels={'acceptance_rate': 'Acceptance Rate (%)', 'language': 'Language'})
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Lines acceptance rate by language
+            fig = px.bar(language_stats, x='language', y='lines_acceptance_rate',
+                        title='Lines Acceptance Rate by Language',
+                        labels={'lines_acceptance_rate': 'Lines Acceptance Rate (%)', 'language': 'Language'})
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Display detailed table
+        st.markdown("### Detailed Language Statistics")
+        display_df = language_stats[['language', 'total_engaged_users', 'total_code_suggestions', 
+                                   'total_code_acceptances', 'acceptance_rate', 
+                                   'total_code_lines_suggested', 'total_code_lines_accepted', 
+                                   'lines_acceptance_rate']]
+        display_df = display_df.round({'acceptance_rate': 2, 'lines_acceptance_rate': 2})
+        st.dataframe(display_df)
+    else:
+        st.info("No language usage data available for the selected period.")
 
 def create_editor_usage_chart(data):
     """Create a chart showing editor usage over time"""
@@ -191,15 +289,65 @@ def create_editor_usage_chart(data):
             return fig
     return None
 
-def create_acceptance_rate_analysis(data):
-    """Calculate and display acceptance rate analysis"""
-    # This would require more detailed data than what's in the sample
-    st.info("Acceptance rate analysis requires more detailed data than provided in the sample JSON.")
-    return None
+def create_productivity_analysis(language_df):
+    """Create productivity analysis based on code completion metrics"""
+    st.markdown("## 🚀 Productivity Analysis")
+    
+    # Calculate overall productivity metrics
+    total_suggestions = language_df['total_code_suggestions'].sum()
+    total_acceptances = language_df['total_code_acceptances'].sum()
+    total_lines_suggested = language_df['total_code_lines_suggested'].sum()
+    total_lines_accepted = language_df['total_code_lines_accepted'].sum()
+    
+    overall_acceptance_rate = (total_acceptances / total_suggestions * 100) if total_suggestions > 0 else 0
+    lines_acceptance_rate = (total_lines_accepted / total_lines_suggested * 100) if total_lines_suggested > 0 else 0
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Suggestions", f"{total_suggestions:,}")
+    
+    with col2:
+        st.metric("Total Acceptances", f"{total_acceptances:,}")
+    
+    with col3:
+        st.metric("Overall Acceptance Rate", f"{overall_acceptance_rate:.1f}%")
+    
+    with col4:
+        st.metric("Lines Acceptance Rate", f"{lines_acceptance_rate:.1f}%")
+    
+    # Daily productivity trends
+    daily_stats = language_df.groupby('date').agg({
+        'total_code_suggestions': 'sum',
+        'total_code_acceptances': 'sum',
+        'total_code_lines_suggested': 'sum',
+        'total_code_lines_accepted': 'sum'
+    }).reset_index()
+    
+    daily_stats['acceptance_rate'] = (daily_stats['total_code_acceptances'] / 
+                                     daily_stats['total_code_suggestions'] * 100)
+    daily_stats['acceptance_rate'] = daily_stats['acceptance_rate'].replace([np.inf, -np.inf], 0)
+    daily_stats['acceptance_rate'] = daily_stats['acceptance_rate'].fillna(0)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        fig = px.line(daily_stats, x='date', y=['total_code_suggestions', 'total_code_acceptances'],
+                     title='Daily Code Suggestions and Acceptances',
+                     labels={'value': 'Count', 'variable': 'Metric'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        fig = px.line(daily_stats, x='date', y='acceptance_rate',
+                     title='Daily Acceptance Rate Trend',
+                     labels={'acceptance_rate': 'Acceptance Rate (%)'})
+        fig.update_yaxes(range=[0, 100])
+        st.plotly_chart(fig, use_container_width=True)
 
-def display_analysis(df):
+def display_analysis(df, language_df):
     """Display the analysis for the provided DataFrame"""
     df['date'] = pd.to_datetime(df['date'])
+    language_df['date'] = pd.to_datetime(language_df['date'])
     
     # Display summary metrics
     st.markdown("## 📊 Summary Metrics")
@@ -221,8 +369,11 @@ def display_analysis(df):
         start_date, end_date = selected_dates
         filtered_df = df[(df['date'] >= pd.to_datetime(start_date)) & 
                        (df['date'] <= pd.to_datetime(end_date))]
+        filtered_language_df = language_df[(language_df['date'] >= pd.to_datetime(start_date)) & 
+                                         (language_df['date'] <= pd.to_datetime(end_date))]
     else:
         filtered_df = df
+        filtered_language_df = language_df
     
     # Time series charts
     st.markdown("## 📈 Time Series Analysis")
@@ -243,13 +394,15 @@ def display_analysis(df):
         fig = create_timeseries_chart(filtered_df, 'code_completion_users', 'Code Completion Users Over Time')
         st.plotly_chart(fig, use_container_width=True)
     
-    # Language usage
-    st.markdown("## 💻 Language Usage")
-    language_fig = create_language_usage_chart(filtered_df)
-    if language_fig:
-        st.plotly_chart(language_fig, use_container_width=True)
-    else:
-        st.info("No language usage data available for the selected period.")
+    # Language usage - individual charts
+    st.markdown("## 💻 Language Usage (Individual Charts)")
+    create_individual_language_charts(filtered_language_df)
+    
+    # Acceptance rate analysis
+    create_acceptance_rate_analysis(filtered_language_df)
+    
+    # Productivity analysis
+    create_productivity_analysis(filtered_language_df)
     
     # Editor usage
     st.markdown("## 🖥️ Editor Usage")
@@ -312,72 +465,14 @@ def main():
             
             if raw_data:
                 df = flatten_data(raw_data)
-                display_analysis(df)
+                language_df = extract_language_acceptance_data(raw_data)
+                display_analysis(df, language_df)
             else:
                 st.error("Failed to process the uploaded file. Please check the format.")
         else:
             st.info("Please upload a Copilot metrics JSON file to begin analysis.")
             
-            # Show sample data structure
-            # st.markdown("### Expected JSON Structure")
-            # st.json({
-            #     "date": "YYYY-MM-DD",
-            #     "copilot_ide_chat": {
-            #         "total_engaged_users": 0,
-            #         "editors": [
-            #             {
-            #                 "name": "editor_name",
-            #                 "models": [
-            #                     {
-            #                         "name": "model_name",
-            #                         "total_chats": 0,
-            #                         "is_custom_model": False,
-            #                         "total_engaged_users": 0
-            #                     }
-            #                 ],
-            #                 "total_engaged_users": 0
-            #             }
-            #         ]
-            #     },
-            #     "total_active_users": 0,
-            #     "copilot_dotcom_chat": {
-            #         "total_engaged_users": 0
-            #     },
-            #     "total_engaged_users": 0,
-            #     "copilot_dotcom_pull_requests": {
-            #         "total_engaged_users": 0
-            #     },
-            #     "copilot_ide_code_completions": {
-            #         "total_engaged_users": 0,
-            #         "editors": [
-            #             {
-            #                 "name": "editor_name",
-            #                 "models": [
-            #                     {
-            #                         "name": "model_name",
-            #                         "languages": [
-            #                             {
-            #                                 "name": "language_name",
-            #                                 "total_engaged_users": 0,
-            #                                 "total_code_acceptances": 0,
-            #                                 "total_code_suggestions": 0
-            #                             }
-            #                         ],
-            #                         "is_custom_model": False,
-            #                         "total_engaged_users": 0
-            #                     }
-            #                 ],
-            #                 "total_engaged_users": 0
-            #             }
-            #         ],
-            #         "languages": [
-            #             {
-            #                 "name": "language_name",
-            #                 "total_engaged_users": 0
-            #             }
-            #         ]
-            #     }
-            # })
+          
     
     with tab2:
         st.markdown("### Fetch Data from GitHub API")
@@ -410,9 +505,10 @@ def main():
                     if raw_data:
                         st.success("Data fetched successfully!")
                         df = flatten_data(raw_data)
+                        language_df = extract_language_acceptance_data(raw_data)
                         
                         # Display the data
-                        display_analysis(df)
+                        display_analysis(df, language_df)
                         
                         # Option to download the fetched data
                         json_data = json.dumps(raw_data, indent=2)
